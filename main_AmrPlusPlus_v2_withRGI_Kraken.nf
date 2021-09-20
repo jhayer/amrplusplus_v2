@@ -4,7 +4,7 @@
 vim: syntax=groovy
 -*- mode: groovy;-*-
 */
-nextflow.preview.dsl=2
+nextflow.enable.dsl=2
 
 if (params.help ) {
     return help()
@@ -49,12 +49,23 @@ trailing = params.trailing
 slidingwindow = params.slidingwindow
 minlen = params.minlen
 
-// DATA INPUT ILLUMINA
-Channel
-    .fromFilePairs( "${params.reads}/*_{1,2}*.fastq{,.gz}", checkIfExists: true)
-    .ifEmpty { exit 1, "Read pair files could not be found: ${params.reads}" }
-    .set { reads }
+workflow {
+  // DATA INPUT ILLUMINA
+  Channel
+      .fromFilePairs( "${params.reads}/*_{1,2}*.fastq{,.gz}", checkIfExists: true)
+      .ifEmpty { exit 1, "Read pair files could not be found: ${params.reads}" }
+      .set { reads }
 
+
+  //*************************************************
+  // STEP 0 - Include needed modules
+  //*************************************************
+
+  include {fastp} from './modules/fastp' params(output: params.output)
+  // run fastp module
+  fastp(reads)
+  paired_fastq = fastp.out[0]
+}
 
 
 /*
@@ -112,15 +123,6 @@ process QCStats {
     """
 }
 */
-
-//*************************************************
-// STEP 0 - Include needed modules
-//*************************************************
-
-include {fastp} from './modules/fastp' params(output: params.output)
-// run fastp module
-fastp(reads)
-paired_fastq = fastp.out[0]
 
 if( !params.host_index ) {
     process BuildHostIndex {
