@@ -1,6 +1,6 @@
 process fastp {
     label 'fastp'
-    publishDir "${params.output}/${id}/qc", mode: 'copy'
+    publishDir "${params.output}/qc", mode: 'copy'
     input:
         tuple val(id), path(illumina)
     output:

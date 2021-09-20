@@ -4,6 +4,7 @@
 vim: syntax=groovy
 -*- mode: groovy;-*-
 */
+nextflow.preview.dsl=2
 
 if (params.help ) {
     return help()
@@ -48,11 +49,15 @@ trailing = params.trailing
 slidingwindow = params.slidingwindow
 minlen = params.minlen
 
+// DATA INPUT ILLUMINA
 Channel
-    .fromFilePairs( params.reads, flat: true )
+    .fromFilePairs( "${params.reads}/*_{1,2}*.fastq{,.gz}", checkIfExists: true)
     .ifEmpty { exit 1, "Read pair files could not be found: ${params.reads}" }
     .set { reads }
 
+
+
+/*
 process RunQC {
     tag { sample_id }
 
@@ -106,6 +111,16 @@ process QCStats {
     ${PYTHON3} $baseDir/bin/trimmomatic_stats.py -i ${stats} -o trimmomatic.stats
     """
 }
+*/
+
+//*************************************************
+// STEP 0 - Include needed modules
+//*************************************************
+
+include {fastp} from './modules/fastp' params(output: params.output)
+// run fastp module
+fastp(reads)
+paired_fastq = fastp.out[0]
 
 if( !params.host_index ) {
     process BuildHostIndex {
@@ -478,9 +493,9 @@ process RunRarefaction {
 
 process ExtractSNP {
      tag { sample_id }
-     
+
      errorStrategy 'ignore'
-     
+
      publishDir "${params.output}/ExtractMegaresSNPs", mode: "copy",
          saveAs: { filename ->
              if(filename.indexOf(".snp.fasta") > 0) "SNP_fasta/$filename"
