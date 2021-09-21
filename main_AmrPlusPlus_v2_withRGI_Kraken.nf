@@ -49,22 +49,34 @@ trailing = params.trailing
 slidingwindow = params.slidingwindow
 minlen = params.minlen
 
+//*************************************************
+// STEP 0 - Include needed modules
+//*************************************************
+include {fastp} from './modules/fastp' params(output: params.output)
+
 workflow {
   // DATA INPUT ILLUMINA
-  Channel
+  reads = Channel
       .fromFilePairs( "${params.reads}/*_{1,2}*.fastq{,.gz}", checkIfExists: true)
       .ifEmpty { exit 1, "Read pair files could not be found: ${params.reads}" }
-      .set { reads }
 
-
-  //*************************************************
-  // STEP 0 - Include needed modules
-  //*************************************************
-
-  include {fastp} from './modules/fastp' params(output: params.output)
   // run fastp module
   fastp(reads)
   paired_fastq = fastp.out[0]
+/*
+  idxstats_logs.toSortedList().set { host_removal_stats }
+
+  kraken_report.toSortedList().set { kraken_l_to_w }
+  kraken_filter_report.toSortedList().set { kraken_filter_l_to_w }
+
+  megares_resistome_counts.toSortedList().set { megares_amr_l_to_w }
+
+  megares_dedup_resistome_counts.toSortedList().set { megares_dedup_amr_l_to_w }
+
+  perfect_confirmed_counts.toSortedList().set { perfect_confirmed_amr_l_to_w }
+
+  dedup_perfect_confirmed_counts.toSortedList().set { dedup_perfect_confirmed_amr_l_to_w }
+*/
 }
 
 
@@ -182,7 +194,7 @@ process RemoveHostDNA {
     """
 }
 
-idxstats_logs.toSortedList().set { host_removal_stats }
+//idxstats_logs.toSortedList().set { host_removal_stats }
 
 process HostRemovalStats {
     tag { sample_id }
@@ -268,8 +280,8 @@ process RunKraken {
      """
 }
 
-kraken_report.toSortedList().set { kraken_l_to_w }
-kraken_filter_report.toSortedList().set { kraken_filter_l_to_w }
+//kraken_report.toSortedList().set { kraken_l_to_w }
+//kraken_filter_report.toSortedList().set { kraken_filter_l_to_w }
 
 process KrakenResults {
     tag { }
@@ -388,7 +400,7 @@ process RunResistome {
     """
 }
 
-megares_resistome_counts.toSortedList().set { megares_amr_l_to_w }
+//megares_resistome_counts.toSortedList().set { megares_amr_l_to_w }
 
 process ResistomeResults {
     tag { }
@@ -438,7 +450,7 @@ process SamDedupRunResistome {
     """
 }
 
-megares_dedup_resistome_counts.toSortedList().set { megares_dedup_amr_l_to_w }
+//megares_dedup_resistome_counts.toSortedList().set { megares_dedup_amr_l_to_w }
 
 process SamDedupResistomeResults {
     tag { }
@@ -601,7 +613,7 @@ process Confirmed_AMR_hits {
 }
 
 
-perfect_confirmed_counts.toSortedList().set { perfect_confirmed_amr_l_to_w }
+//perfect_confirmed_counts.toSortedList().set { perfect_confirmed_amr_l_to_w }
 
 process Confirmed_ResistomeResults {
      tag {}
@@ -724,7 +736,7 @@ process ConfirmDedupAMRHits {
 }
 
 
-dedup_perfect_confirmed_counts.toSortedList().set { dedup_perfect_confirmed_amr_l_to_w }
+//dedup_perfect_confirmed_counts.toSortedList().set { dedup_perfect_confirmed_amr_l_to_w }
 
 process DedupSNPConfirmed_ResistomeResults {
      tag {}
