@@ -49,36 +49,25 @@ trailing = params.trailing
 slidingwindow = params.slidingwindow
 minlen = params.minlen
 
-//*************************************************
-// STEP 0 - Include needed modules
-//*************************************************
-include {fastp} from './modules/fastp' params(output: params.output)
+reads = Channel
+    .fromFilePairs( "${params.reads}/*_{1,2}*.fastq{,.gz}", checkIfExists: true)
+    .ifEmpty { exit 1, "Read pair files could not be found: ${params.reads}" }
 
-workflow {
-  // DATA INPUT ILLUMINA
-  reads = Channel
-      .fromFilePairs( "${params.reads}/*_{1,2}*.fastq{,.gz}", checkIfExists: true)
-      .ifEmpty { exit 1, "Read pair files could not be found: ${params.reads}" }
-
-  // run fastp module
-  fastp(reads)
-  paired_fastq = fastp.out[0]
-/*
-  idxstats_logs.toSortedList().set { host_removal_stats }
-
-  kraken_report.toSortedList().set { kraken_l_to_w }
-  kraken_filter_report.toSortedList().set { kraken_filter_l_to_w }
-
-  megares_resistome_counts.toSortedList().set { megares_amr_l_to_w }
-
-  megares_dedup_resistome_counts.toSortedList().set { megares_dedup_amr_l_to_w }
-
-  perfect_confirmed_counts.toSortedList().set { perfect_confirmed_amr_l_to_w }
-
-  dedup_perfect_confirmed_counts.toSortedList().set { dedup_perfect_confirmed_amr_l_to_w }
-*/
+process fastp {
+    label 'fastp'
+    publishDir "${params.output}/qc", mode: 'copy'
+    input:
+        tuple val(sample_id), path(reads)
+    output:
+        tuple val(sample_id), path("*_R?_clean.fastq")
+        path("${sample_id}_fastp_report.html")
+    script:
+        """
+        fastp -i ${reads[0]} -I ${reads[1]} \
+            -o ${sample_id}_R1_clean.fastq -O ${sample_id}_R2_clean.fastq \
+            --detect_adapter_for_pe --html ${sample_id}_fastp_report.html
+        """
 }
-
 
 /*
 process RunQC {
