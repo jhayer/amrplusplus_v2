@@ -4,7 +4,6 @@
 vim: syntax=groovy
 -*- mode: groovy;-*-
 */
-nextflow.enable.dsl=2
 
 if (params.help ) {
     return help()
@@ -57,14 +56,14 @@ process fastp {
     label 'fastp'
     publishDir "${params.output}/qc", mode: 'copy'
     input:
-        tuple val(sample_id), path(reads)
+        set sample_id, file(forward), file(reverse) from reads
     output:
-        tuple val(sample_id), path("*_R?_clean.fastq")
-        path("${sample_id}_fastp_report.html")
+        set sample_id, file("${sample_id}.1P.fastq.gz"), file("${sample_id}.2P.fastq.gz") into (paired_fastq) 
+        file("${sample_id}_fastp_report.html")
     script:
         """
-        fastp -i ${reads[0]} -I ${reads[1]} \
-            -o ${sample_id}_R1_clean.fastq -O ${sample_id}_R2_clean.fastq \
+        fastp -i ${forward} -I ${reverse} \
+            -o ${sample_id}.1P.fastq.gz -O ${sample_id}.2P.fastq.gz \
             --detect_adapter_for_pe --html ${sample_id}_fastp_report.html
         """
 }
@@ -183,7 +182,7 @@ process RemoveHostDNA {
     """
 }
 
-//idxstats_logs.toSortedList().set { host_removal_stats }
+idxstats_logs.toSortedList().set { host_removal_stats }
 
 process HostRemovalStats {
     tag { sample_id }
@@ -269,8 +268,8 @@ process RunKraken {
      """
 }
 
-//kraken_report.toSortedList().set { kraken_l_to_w }
-//kraken_filter_report.toSortedList().set { kraken_filter_l_to_w }
+kraken_report.toSortedList().set { kraken_l_to_w }
+kraken_filter_report.toSortedList().set { kraken_filter_l_to_w }
 
 process KrakenResults {
     tag { }
@@ -389,7 +388,7 @@ process RunResistome {
     """
 }
 
-//megares_resistome_counts.toSortedList().set { megares_amr_l_to_w }
+megares_resistome_counts.toSortedList().set { megares_amr_l_to_w }
 
 process ResistomeResults {
     tag { }
@@ -439,7 +438,7 @@ process SamDedupRunResistome {
     """
 }
 
-//megares_dedup_resistome_counts.toSortedList().set { megares_dedup_amr_l_to_w }
+megares_dedup_resistome_counts.toSortedList().set { megares_dedup_amr_l_to_w }
 
 process SamDedupResistomeResults {
     tag { }
@@ -602,7 +601,7 @@ process Confirmed_AMR_hits {
 }
 
 
-//perfect_confirmed_counts.toSortedList().set { perfect_confirmed_amr_l_to_w }
+perfect_confirmed_counts.toSortedList().set { perfect_confirmed_amr_l_to_w }
 
 process Confirmed_ResistomeResults {
      tag {}
@@ -725,7 +724,7 @@ process ConfirmDedupAMRHits {
 }
 
 
-//dedup_perfect_confirmed_counts.toSortedList().set { dedup_perfect_confirmed_amr_l_to_w }
+dedup_perfect_confirmed_counts.toSortedList().set { dedup_perfect_confirmed_amr_l_to_w }
 
 process DedupSNPConfirmed_ResistomeResults {
      tag {}
