@@ -14,7 +14,7 @@ if( params.host_index ) {
 }
 if( params.host ) {
     host = file(params.host)
-    if( !host.exists() ) return host_error(host)
+//    if( !host.exists() ) return host_error(host)
 }
 if( params.amr ) {
     amr = file(params.amr)
@@ -56,172 +56,121 @@ process fastp {
     label 'fastp'
     publishDir "${params.output}/qc", mode: 'copy'
     input:
-        set sample_id, file(forward), file(reverse) from reads
+        tuple val(id), path(reads) from reads
     output:
-        set sample_id, file("${sample_id}.1P.fastq.gz"), file("${sample_id}.2P.fastq.gz") into (paired_fastq) 
-        file("${sample_id}_fastp_report.html")
+        set val(id), file("${id}.1P.fastq.gz"), file("${id}.2P.fastq.gz") into (paired_fastq, non_host_fastq_megares, non_host_fastq_dedup,non_host_fastq_kraken)
+        path("${id}_fastp_report.html")
     script:
         """
-        fastp -i ${forward} -I ${reverse} \
-            -o ${sample_id}.1P.fastq.gz -O ${sample_id}.2P.fastq.gz \
-            --detect_adapter_for_pe --html ${sample_id}_fastp_report.html
+        fastp -i ${reads[0]} -I ${reads[1]} \
+            -o ${id}.1P.fastq.gz -O ${id}.2P.fastq.gz \
+            --detect_adapter_for_pe --html ${id}_fastp_report.html
         """
 }
 
-/*
-process RunQC {
-    tag { sample_id }
 
-    publishDir "${params.output}/RunQC", mode: 'copy', pattern: '*.fastq.gz',
-        saveAs: { filename ->
-            if(filename.indexOf("P.fastq.gz") > 0) "Paired/$filename"
-            else if(filename.indexOf("U.fastq.gz") > 0) "Unpaired/$filename"
-            else {}
-        }
+if( params.skip_host_map == true){
+	println("Skipping host mapping steps")
+} else {
+  if( !params.host_index ) {
+      process BuildHostIndex {
+          publishDir "${params.output}/BuildHostIndex", mode: "copy"
 
-    input:
-        set sample_id, file(forward), file(reverse) from reads
+          tag { host.baseName }
 
-    output:
-        set sample_id, file("${sample_id}.1P.fastq.gz"), file("${sample_id}.2P.fastq.gz") into (paired_fastq)
-        set sample_id, file("${sample_id}.1U.fastq.gz"), file("${sample_id}.2U.fastq.gz") into (unpaired_fastq)
-        file("${sample_id}.trimmomatic.stats.log") into (trimmomatic_stats)
+          input:
+              file(host)
 
-    """
-     ${JAVA} -jar ${TRIMMOMATIC} \
-      PE \
-      -threads ${threads} \
-      $forward $reverse ${sample_id}.1P.fastq.gz ${sample_id}.1U.fastq.gz ${sample_id}.2P.fastq.gz ${sample_id}.2U.fastq.gz \
-      ILLUMINACLIP:${adapters}:2:30:10:3:TRUE \
-      LEADING:${leading} \
-      TRAILING:${trailing} \
-      SLIDINGWINDOW:${slidingwindow} \
-      MINLEN:${minlen} \
-      2> ${sample_id}.trimmomatic.stats.log
-    """
+          output:
+              file '*' into (host_index)
+
+          """
+          ${BWA} index ${host}
+          """
+      }
+  }
+  process AlignReadsToHost {
+      tag { sample_id }
+
+      publishDir "${params.output}/AlignReadsToHost", mode: "copy"
+
+      input:
+          set sample_id, file(forward), file(reverse) from paired_fastq
+          file index from host_index
+          file host
+
+      output:
+          set sample_id, file("${sample_id}.host.sam") into (host_sam)
+
+      """
+      ${BWA} mem ${host} ${forward} ${reverse} -t ${threads} > ${sample_id}.host.sam
+      """
+  }
+
+  process RemoveHostDNA {
+      tag { sample_id }
+
+      publishDir "${params.output}/RemoveHostDNA", mode: "copy", pattern: '*.bam',
+  	saveAs: { filename ->
+              if(filename.indexOf(".bam") > 0) "NonHostBAM/$filename"
+          }
+
+      input:
+          set sample_id, file(sam) from host_sam
+
+      output:
+          set sample_id, file("${sample_id}.host.sorted.removed.bam") into (non_host_bam)
+          file("${sample_id}.samtools.idxstats") into (idxstats_logs)
+
+      """
+      ${SAMTOOLS} view -bS ${sam} | ${SAMTOOLS} sort -@ ${threads} -o ${sample_id}.host.sorted.bam
+      ${SAMTOOLS} index ${sample_id}.host.sorted.bam && ${SAMTOOLS} idxstats ${sample_id}.host.sorted.bam > ${sample_id}.samtools.idxstats
+      ${SAMTOOLS} view -h -f 4 -b ${sample_id}.host.sorted.bam -o ${sample_id}.host.sorted.removed.bam
+      """
+  }
+
+  idxstats_logs.toSortedList().set { host_removal_stats }
+
+  process HostRemovalStats {
+      tag { sample_id }
+
+      publishDir "${params.output}/RemoveHostDNA", mode: "copy",
+          saveAs: { filename ->
+              if(filename.indexOf(".stats") > 0) "HostRemovalStats/$filename"
+          }
+
+      input:
+          file(stats) from host_removal_stats
+
+      output:
+          file("host.removal.stats")
+
+      """
+      ${PYTHON3} $baseDir/bin/samtools_idxstats.py -i ${stats} -o host.removal.stats
+      """
+  }
+
+  process NonHostReads {
+      tag { sample_id }
+
+      publishDir "${params.output}/NonHostReads", mode: "copy"
+
+      input:
+          set sample_id, file(bam) from non_host_bam
+
+      output:
+          set sample_id, file("${sample_id}.non.host.R1.fastq.gz"), file("${sample_id}.non.host.R2.fastq.gz") into (non_host_fastq_megares, non_host_fastq_dedup,non_host_fastq_kraken)
+
+      """
+      ${BEDTOOLS}  \
+         bamtofastq \
+        -i ${bam} \
+        -fq ${sample_id}.non.host.R1.fastq.gz \
+        -fq2 ${sample_id}.non.host.R2.fastq.gz
+      """
+  }
 }
 
-trimmomatic_stats.toSortedList().set { trim_stats }
-
-process QCStats {
-    tag { sample_id }
-
-    publishDir "${params.output}/RunQC", mode: 'copy',
-        saveAs: { filename ->
-            if(filename.indexOf(".stats") > 0) "Stats/$filename"
-            else {}
-        }
-
-    input:
-        file(stats) from trim_stats
-
-    output:
-	file("trimmomatic.stats")
-
-    """
-    ${PYTHON3} $baseDir/bin/trimmomatic_stats.py -i ${stats} -o trimmomatic.stats
-    """
-}
-*/
-
-if( !params.host_index ) {
-    process BuildHostIndex {
-        publishDir "${params.output}/BuildHostIndex", mode: "copy"
-
-        tag { host.baseName }
-
-        input:
-            file(host)
-
-        output:
-            file '*' into (host_index)
-
-        """
-        ${BWA} index ${host}
-        """
-    }
-}
-
-process AlignReadsToHost {
-    tag { sample_id }
-
-    publishDir "${params.output}/AlignReadsToHost", mode: "copy"
-
-    input:
-        set sample_id, file(forward), file(reverse) from paired_fastq
-        file index from host_index
-        file host
-
-    output:
-        set sample_id, file("${sample_id}.host.sam") into (host_sam)
-
-    """
-    ${BWA} mem ${host} ${forward} ${reverse} -t ${threads} > ${sample_id}.host.sam
-    """
-}
-
-process RemoveHostDNA {
-    tag { sample_id }
-
-    publishDir "${params.output}/RemoveHostDNA", mode: "copy", pattern: '*.bam',
-	saveAs: { filename ->
-            if(filename.indexOf(".bam") > 0) "NonHostBAM/$filename"
-        }
-
-    input:
-        set sample_id, file(sam) from host_sam
-
-    output:
-        set sample_id, file("${sample_id}.host.sorted.removed.bam") into (non_host_bam)
-        file("${sample_id}.samtools.idxstats") into (idxstats_logs)
-
-    """
-    ${SAMTOOLS} view -bS ${sam} | ${SAMTOOLS} sort -@ ${threads} -o ${sample_id}.host.sorted.bam
-    ${SAMTOOLS} index ${sample_id}.host.sorted.bam && ${SAMTOOLS} idxstats ${sample_id}.host.sorted.bam > ${sample_id}.samtools.idxstats
-    ${SAMTOOLS} view -h -f 4 -b ${sample_id}.host.sorted.bam -o ${sample_id}.host.sorted.removed.bam
-    """
-}
-
-idxstats_logs.toSortedList().set { host_removal_stats }
-
-process HostRemovalStats {
-    tag { sample_id }
-
-    publishDir "${params.output}/RemoveHostDNA", mode: "copy",
-        saveAs: { filename ->
-            if(filename.indexOf(".stats") > 0) "HostRemovalStats/$filename"
-        }
-
-    input:
-        file(stats) from host_removal_stats
-
-    output:
-        file("host.removal.stats")
-
-    """
-    ${PYTHON3} $baseDir/bin/samtools_idxstats.py -i ${stats} -o host.removal.stats
-    """
-}
-
-process NonHostReads {
-    tag { sample_id }
-
-    publishDir "${params.output}/NonHostReads", mode: "copy"
-
-    input:
-        set sample_id, file(bam) from non_host_bam
-
-    output:
-        set sample_id, file("${sample_id}.non.host.R1.fastq.gz"), file("${sample_id}.non.host.R2.fastq.gz") into (non_host_fastq_megares, non_host_fastq_dedup,non_host_fastq_kraken)
-
-    """
-    ${BEDTOOLS}  \
-       bamtofastq \
-      -i ${bam} \
-      -fq ${sample_id}.non.host.R1.fastq.gz \
-      -fq2 ${sample_id}.non.host.R2.fastq.gz
-    """
-}
 
 
 /*
@@ -263,8 +212,8 @@ process RunKraken {
       file("${sample_id}.kraken.filtered.raw") into kraken_filter_raw
 
      """
-     ${KRAKEN2} --db ${kraken_db} --paired ${forward} ${reverse} --threads ${threads} --report ${sample_id}.kraken.report > ${sample_id}.kraken.raw
-     ${KRAKEN2} --db ${kraken_db} --confidence 1 --paired ${forward} ${reverse} --threads ${threads} --report ${sample_id}.kraken.filtered.report > ${sample_id}.kraken.filtered.raw
+     ${KRAKEN2} --db ${kraken_db} --paired ${forward} ${reverse} --gzip-compressed --threads ${threads} --report ${sample_id}.kraken.report > ${sample_id}.kraken.raw
+     ${KRAKEN2} --db ${kraken_db} --confidence 1 --paired ${forward} ${reverse} --gzip-compressed --threads ${threads} --report ${sample_id}.kraken.filtered.report > ${sample_id}.kraken.filtered.raw
      """
 }
 
@@ -652,6 +601,7 @@ process ExtractDedupSNP {
       -group_fp ${sample_id}.group.tsv \
       -class_fp ${sample_id}.class.tsv \
       -mech_fp ${sample_id}.mechanism.tsv \
+      -type_fp ${sample_id}.type.tsv \
       -t ${threshold}
 
      """
@@ -808,6 +758,7 @@ def help() {
     println ""
     println "    --reads         STR      path to FASTQ formatted input sequences"
     println "    --adapters      STR      path to FASTA formatted adapter sequences"
+    println "    --skip_host_map BOOL     skip host mapping step if true"
     println "    --host          STR      path to FASTA formatted host genome"
     println "    --host_index    STR      path to BWA generated index files"
     println "    --amr           STR      path to AMR resistance database"
