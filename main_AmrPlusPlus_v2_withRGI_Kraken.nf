@@ -483,7 +483,7 @@ process ExtractSNP {
 process RunRGI {
      tag { sample_id }
      errorStrategy 'ignore'
-
+     conda 'rgi'
 
      publishDir "${params.output}/RunRGI", mode: "symlink"
 
@@ -495,7 +495,6 @@ process RunRGI {
          set sample_id, file("${sample_id}*rgi_output.txt") into rgi_results
 
      """
-     conda activate rgi
      ${RGI} load --local -i ${card_db} --debug
 
      # We are using the code provided in the following RGI github issue https://github.com/arpcard/rgi/issues/93
